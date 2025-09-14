@@ -131,14 +131,14 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Affiche l'aide."""
     msg = (
-        "🤖 Commandes disponibles :\n"
-        "/tasks - Voir les tâches en attente\n"
-        "/logs - Voir les derniers logs\n"
-        "/balance - Voir le solde actuel\n"
-        "/withdrawals - Voir l'historique des retraits\n"
-        "/scrape - Ajouter une tâche de scraping\n"
-        "/lastbets - Voir les derniers paris\n"
-        "/stop - Arrêter le bot\n"
+        "🤖 Commandes disponibles :\n\n"
+        "/tasks - Voir les tâches en attente\n\n"
+        "/logs - Voir les derniers logs\n\n"
+        "/balance - Voir le solde actuel\n\n"
+        "/withdrawals - Voir l'historique des retraits\n\n"
+        "/scrape - Ajouter une tâche de scraping\n\n"
+        "/lastbets - Voir les derniers paris\n\n"
+        "/stop - Arrêter le bot\n\n"
         "/help - Afficher cette aide"
     )
     await update.message.reply_text(msg)

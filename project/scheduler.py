@@ -1,47 +1,77 @@
 """
 scheduler.py
 ------------
-Planifie les paris sur la base des boosts récupérés.
-Chaque boost est géré dans un thread séparé pour éviter
-que l'attente bloque le reste du programme.
+Orchestrateur des tâches.
+- Récupère les tasks 'pending'
+- Attends jusqu'à 'scheduled_time'
+- Lance leur exécution en parallèle
 """
 
-import threading
 import time
-import numpy as np
-from datetime import datetime, timedelta
-from db import log
+import threading
+from datetime import datetime
+from db import get_pending_tasks, log
+from tasks import run_task_async
+from scraper import scrape_boosts
 from betting import place_bet
 
-def schedule_boost(boost):
+
+# -----------------------------
+# Mapping type -> fonction
+# -----------------------------
+
+TASK_FUNCTIONS = {
+    "scrape": scrape_boosts,
+    "bet": place_bet,
+    # plus tard : "withdraw": perform_withdraw, etc.
+}
+
+
+# -----------------------------
+# Exécution planifiée
+# -----------------------------
+
+def _execute_task_later(task):
     """
-    Planifie un boost dans un thread séparé.
+    Attends jusqu'à scheduled_time puis exécute la tâche.
+    Chaque tâche est lancée dans un thread séparé.
     """
-    t = threading.Thread(target=_execute_boost, args=(boost,), daemon=True)
-    t.start()
+    task_id, task_type, boost_id, status, scheduled_time = task[0], task[1], task[2], task[3], task[4]
 
-def _execute_boost(boost):
+    if scheduled_time:
+        delay = (datetime.fromisoformat(scheduled_time) - datetime.now()).total_seconds()
+        if delay > 0:
+            log("INFO", f"Tâche {task_id} ({task_type}) planifiée dans {int(delay)} sec")
+            time.sleep(delay)
+
+    # Lancer la tâche réelle
+    func = TASK_FUNCTIONS.get(task_type)
+    if not func:
+        log("ERROR", f"Tâche {task_id} : type {task_type} non reconnu")
+        return
+
+    if boost_id:
+        run_task_async(task_id, task_type, func, boost_id)
+    else:
+        run_task_async(task_id, task_type, func)
+
+
+# -----------------------------
+# Boucle principale
+# -----------------------------
+
+def scheduler_loop(interval=30):
     """
-    Fonction exécutée par chaque thread pour gérer un boost.
-    Elle attend jusqu'à l'heure choisie dans la plage du boost,
-    puis place le pari.
+    Boucle infinie du scheduler :
+    - Vérifie toutes les `interval` secondes s'il y a des tasks pending
+    - Les planifie si nécessaire
     """
-    start = datetime.fromisoformat(boost["start"])
-    end = datetime.fromisoformat(boost["end"])
-    duration = (end - start).seconds
+    log("INFO", "Scheduler démarré")
 
-    # Tirage normal autour du début (distribution normale tronquée)
-    mean = 0
-    sigma = duration / 4
-    offset = abs(int(np.random.normal(mean, sigma)))
-    target_time = start + timedelta(seconds=min(offset, duration))
-
-    log("INFO", f"Boost {boost['id']} programmé pour {target_time}")
-
-    # Attendre jusqu'à l'heure programmée
-    delay = (target_time - datetime.now()).total_seconds()
-    if delay > 0:
-        time.sleep(delay)
-
-    # Quand l'heure est atteinte → placer le pari
-    place_bet(boost)
+    while True:
+        tasks = get_pending_tasks()
+        for task in tasks:
+            # Démarrer chaque tâche dans un thread séparé
+            t = threading.Thread(target=_execute_task_later, args=(task,), daemon=True)
+            t.start()
+        time.sleep(interval)

@@ -1,46 +1,37 @@
 """
 main.py
 -------
-Orchestration du bot.
-- Scrape les boosts
-- Planifie chaque boost dans un thread
-- Lance un thread séparé pour surveiller le solde
-- Watchdog surveille tout et relance si crash
+Point d'entrée du bot.
+- Initialise la DB
+- Lance le bot Telegram
+- Crée une tâche de scraping
+- Démarre le scheduler (gestion des tâches en continu)
 """
 
-from db import init_db, log
-from scraper import get_boosts
-from scheduler import schedule_boost
-from balance import start_balance_watcher
-from notifier import notify
-from watchdog import watchdog
+from db import init_db, create_task, log
+from notifier import notify, start_telegram_bot
+from scheduler import scheduler_loop
+
 
 def main():
-    # Initialisation
+    # Initialiser la DB
     init_db()
     log("INFO", "Bot démarré")
     notify("🤖 Bot démarré")
 
-    # Étape 1 : récupération des boosts
-    boosts = get_boosts()
-    if not boosts:
-        log("INFO", "Aucun boost trouvé")
-        notify("ℹ️ Aucun boost trouvé")
-    else:
-        for b in boosts:
-            schedule_boost(b)  # Chaque boost a son thread
+    # Démarrer le bot Telegram en arrière-plan
+    start_telegram_bot()
 
-    # Étape 2 : surveillance du solde en parallèle
-    start_balance_watcher(interval=600)  # Vérifie toutes les 10 min
+    # Créer une tâche de scraping (au lancement)
+    create_task("scrape")
 
-    # Étape 3 : garder le bot vivant
-    # → Ici, on boucle pour que le process principal reste actif
+    # Lancer le scheduler (boucle infinie)
+    scheduler_loop(interval=10)  # vérifie toutes les 10 sec
+
+
+if __name__ == "__main__":
     try:
-        while True:
-            pass  # Threads font le boulot
+        main()
     except KeyboardInterrupt:
         log("INFO", "Bot arrêté manuellement")
         notify("🛑 Bot arrêté manuellement")
-
-if __name__ == "__main__":
-    watchdog(main)

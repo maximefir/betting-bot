@@ -3,7 +3,7 @@ notifier.py
 -----------
 Gestion des notifications et commandes Telegram.
 - Envoi de messages (notify)
-- Réception de commandes (/tasks, /logs, /retry, /stop, etc.)
+- Réception de commandes (/tasks, /logs, /balance, /withdrawals, /scrape, /lastbets, /stop, etc.)
 """
 
 import threading
@@ -11,7 +11,15 @@ import asyncio
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
-from db import get_pending_tasks, log
+from db import (
+    get_pending_tasks,
+    log,
+    get_last_balance,
+    get_withdrawals,
+    create_task,
+    get_conn,
+    get_last_bets,   # ✅ import corrigé (vient de db.py maintenant)
+)
 
 
 # -----------------------------
@@ -40,7 +48,7 @@ def notify(message: str):
 # -----------------------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 Bot actif. Utilise /tasks ou /logs pour consulter l'état.")
+    await update.message.reply_text("🤖 Bot actif. Utilisez /help pour voir les commandes disponibles.")
 
 async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Affiche les tâches en attente."""
@@ -71,12 +79,69 @@ async def logs_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"[{lvl}] {ts} → {m}\n"
         await update.message.reply_text(msg)
 
+async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche le solde courant."""
+    bal = get_last_balance()
+    if bal is None:
+        await update.message.reply_text("💰 Aucun solde trouvé en DB.")
+    else:
+        await update.message.reply_text(f"💰 Solde actuel : {bal:.2f} €")
+
+async def withdrawals(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche l'historique des retraits."""
+    rows = get_withdrawals(limit=5)
+    if not rows:
+        await update.message.reply_text("🏦 Aucun retrait enregistré.")
+    else:
+        msg = "🏦 Derniers retraits :\n"
+        for amt, ts in rows:
+            msg += f"- {amt:.2f} € le {ts}\n"
+        await update.message.reply_text(msg)
+
+async def scrape(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ajoute une tâche 'scrape' dans la DB."""
+    create_task("scrape")
+    log("INFO", "Tâche 'scrape' ajoutée manuellement via Telegram")
+    await update.message.reply_text("🔍 Tâche 'scrape' ajoutée et planifiée.")
+
+async def lastbets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche les derniers paris (nom du boost uniquement)."""
+    bets = get_last_bets(limit=5)
+    if not bets:
+        await update.message.reply_text("🎲 Aucun pari enregistré.")
+    else:
+        # Récupérer les noms via la DB (boost_id -> name)
+        conn = get_conn()
+        c = conn.cursor()
+        msg = "🎲 Derniers paris :\n"
+        for boost_id, amount, result, gain, ts in bets:
+            c.execute("SELECT name FROM boosts WHERE boost_id = ?", (boost_id,))
+            row = c.fetchone()
+            name = row[0] if row else boost_id
+            msg += f"- {name} : {amount:.2f} € ({result}) le {ts}\n"
+        await update.message.reply_text(msg)
+
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Arrête le bot (manuel)."""
     await update.message.reply_text("🛑 Arrêt manuel demandé.")
     log("INFO", "Bot arrêté par commande /stop")
     import os, signal
     os.kill(os.getpid(), signal.SIGINT)
+
+async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche l'aide."""
+    msg = (
+        "🤖 Commandes disponibles :\n"
+        "/tasks - Voir les tâches en attente\n"
+        "/logs - Voir les derniers logs\n"
+        "/balance - Voir le solde actuel\n"
+        "/withdrawals - Voir l'historique des retraits\n"
+        "/scrape - Ajouter une tâche de scraping\n"
+        "/lastbets - Voir les derniers paris\n"
+        "/stop - Arrêter le bot\n"
+        "/help - Afficher cette aide"
+    )
+    await update.message.reply_text(msg)
 
 
 # -----------------------------
@@ -92,7 +157,12 @@ def start_telegram_bot():
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("tasks", tasks))
         app.add_handler(CommandHandler("logs", logs_cmd))
+        app.add_handler(CommandHandler("balance", balance))
+        app.add_handler(CommandHandler("withdrawals", withdrawals))
+        app.add_handler(CommandHandler("scrape", scrape))
+        app.add_handler(CommandHandler("lastbets", lastbets))
         app.add_handler(CommandHandler("stop", stop))
+        app.add_handler(CommandHandler("help", help))
 
         await app.initialize()
         await app.start()

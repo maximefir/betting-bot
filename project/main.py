@@ -17,7 +17,7 @@ def main():
     # Initialiser la DB
     init_db()
     log("INFO", "Bot démarré")
-    notify("🤖 Bot démarré")
+    notify("🤖 Bot démarré. Utilisez /help pour voir les commandes disponibles.")
 
     # Démarrer le bot Telegram en arrière-plan
     start_telegram_bot()

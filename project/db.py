@@ -5,7 +5,9 @@ Gestion complète de la base SQLite :
 - Logs
 - Boosts
 - Tasks
+- Bets
 - Balances
+- Withdrawals
 """
 
 import sqlite3
@@ -18,7 +20,6 @@ TEST_MODE = os.environ.get("TEST_MODE", "0") == "1"
 
 # Connexion persistante unique en mode test
 _test_conn = None
-
 
 
 # -----------------------------
@@ -49,11 +50,12 @@ def init_db():
         message TEXT
     )""")
 
-    # Boosts
+    # Boosts (⚡ ajout de "name")
     c.execute("""
     CREATE TABLE IF NOT EXISTS boosts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         boost_id TEXT UNIQUE,
+        name TEXT,
         multiplier REAL,
         max_bet REAL,
         start_time TEXT,
@@ -75,6 +77,17 @@ def init_db():
         retry_count INTEGER DEFAULT 0
     )""")
 
+    # Bets
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS bets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        boost_id TEXT,
+        amount REAL,
+        result TEXT,
+        gain REAL,
+        timestamp TEXT
+    )""")
+
     # Balances
     c.execute("""
     CREATE TABLE IF NOT EXISTS balances (
@@ -83,6 +96,13 @@ def init_db():
         timestamp TEXT
     )""")
 
+    # Withdrawals (historique des retraits)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS withdrawals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount REAL,
+        timestamp TEXT
+    )""")
 
     conn.commit()
 
@@ -92,24 +112,29 @@ def init_db():
 # -----------------------------
 
 def log(level: str, message: str):
+    """Ajoute un log en DB et l'affiche en console."""
+    ts = datetime.now().isoformat()
     conn = get_conn()
     c = conn.cursor()
     c.execute("INSERT INTO logs (timestamp, level, message) VALUES (?, ?, ?)",
-              (datetime.now().isoformat(), level, message))
+              (ts, level, message))
     conn.commit()
+    # Print aussi en console
+    print(f"[{level}] {ts} → {message}")
 
 
 # -----------------------------
 # Boosts
 # -----------------------------
 
-def add_boost(boost_id, multiplier, max_bet, start_time, end_time):
+def add_boost(boost_id, name, multiplier, max_bet, start_time, end_time):
+    """Ajoute un boost en DB avec un nom."""
     conn = get_conn()
     c = conn.cursor()
     c.execute("""INSERT OR IGNORE INTO boosts 
-                 (boost_id, multiplier, max_bet, start_time, end_time, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)""",
-              (boost_id, multiplier, max_bet, start_time, end_time, datetime.now().isoformat()))
+                 (boost_id, name, multiplier, max_bet, start_time, end_time, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)""",
+              (boost_id, name, multiplier, max_bet, start_time, end_time, datetime.now().isoformat()))
     conn.commit()
 
 def get_boosts():
@@ -135,7 +160,7 @@ def create_task(task_type, boost_id=None, scheduled_time=None):
 def get_pending_tasks():
     conn = get_conn()
     c = conn.cursor()
-    c.execute("SELECT * FROM tasks WHERE status = 'pending'")
+    c.execute("SELECT * FROM tasks WHERE status = 'pending' ORDER BY id ASC")
     rows = c.fetchall()
     return rows
 
@@ -171,3 +196,40 @@ def get_last_balance():
     c.execute("SELECT balance FROM balances ORDER BY id DESC LIMIT 1")
     row = c.fetchone()
     return row[0] if row else None
+
+
+# -----------------------------
+# Bets
+# -----------------------------
+
+def get_last_bets(limit=5):
+    """Retourne les derniers paris enregistrés."""
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT boost_id, amount, result, gain, timestamp
+        FROM bets
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limit,))
+    rows = c.fetchall()
+    return rows
+
+
+# -----------------------------
+# Withdrawals
+# -----------------------------
+
+def add_withdrawal(amount: float):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("INSERT INTO withdrawals (amount, timestamp) VALUES (?, ?)",
+              (amount, datetime.now().isoformat()))
+    conn.commit()
+
+def get_withdrawals(limit=5):
+    conn = get_conn()
+    c = conn.cursor()
+    c.execute("SELECT amount, timestamp FROM withdrawals ORDER BY id DESC LIMIT ?", (limit,))
+    rows = c.fetchall()
+    return rows
